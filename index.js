@@ -2,82 +2,66 @@ const {
     default: makeWASocket, 
     useMultiFileAuthState, 
     delay, 
-    makeCacheableSignalKeyStore,
-    fetchLatestBaileysVersion
+    makeCacheableSignalKeyStore
 } = require("@whiskeysockets/baileys")
 const pino = require('pino')
 const readline = require("readline")
-const fs = require('fs')
 
 const rl = readline.createInterface({ input: process.stdin, output: process.stdout })
 const question = (text) => new Promise((resolve) => rl.question(text, resolve))
 
 async function startBot() {
-    // Biar gak error "Session" lama, kita pake folder fresh
     const { state, saveCreds } = await useMultiFileAuthState('session_wexin')
-    const { version } = await fetchLatestBaileysVersion()
-
+    
+    // Kita paksa logger bener-bener diem (Level: fatal)
     const sock = makeWASocket({
-        version,
         auth: state,
-        printQRInTerminal: false, 
-        logger: pino({ level: "silent" }), // Ini biar log 'berisik' tadi ILANG
-        browser: ["Ubuntu", "Chrome", "20.0.0.0"]
+        printQRInTerminal: false,
+        logger: pino({ level: "fatal" }), 
+        browser: ["Chrome (Linux)", "", ""]
     })
 
-    // --- LOGIC PAIRING CODE YANG LEBIH RAPI ---
+    // Logic Pairing Code
     if (!sock.authState.creds.registered) {
-        console.clear() // Bersihin layar Termux
+        console.clear()
         console.log("========================================")
-        console.log("     WEXIN REACT CORE - PAIRING CODE    ")
+        console.log("   WEXIN-REACT-CORE: MODE PAIRING")
         console.log("========================================")
         
-        const phoneNumber = await question('Masukkan nomor WA (Contoh: 628xxx): ')
+        const num = await question('Masukkan nomor WA (Contoh: 628xxx): ')
+        const phoneNumber = num.replace(/[^0-9]/g, '')
+        
+        // Kasih jeda dikit biar socket-nya siap
         await delay(3000)
-        const code = await sock.requestPairingCode(phoneNumber.trim())
+        const code = await sock.requestPairingCode(phoneNumber)
         
-        console.log(`\n👉 KODE PAIRING LO: ${code}`)
-        console.log("\nCara Pakai:")
-        console.log("1. Buka WA > Perangkat Tertaut > Tautkan Perangkat")
-        console.log("2. Pilih 'Tautkan dengan nomor telepon saja'")
-        console.log("3. Masukkan kode di atas.\n")
+        console.log(`\n👉 KODE PAIRING ANDA: ${code}\n`)
     }
 
-    // --- LOGIC AUTO REACT CHANNEL ---
     sock.ev.on('messages.upsert', async m => {
         const msg = m.messages[0]
-        if (!msg.message || msg.key.fromMe) return
-        
         if (msg.key.remoteJid.endsWith('@newsletter')) {
-            const emojis = ["🔥", "🚀", "🖕", "💯", "🤮"] // Bebas ganti
-            const count = 5 // Bebas berapa kali
+            // Setting: Bebas pilih emoji & jumlah
+            const listEmoji = ["🔥", "🚀", "😂", "💯", "✅"]
+            const jumlahReact = 5 
             
-            console.log(`[+] Ada postingan baru! Gas ${count} react...`)
-            
-            for (let i = 0; i < count; i++) {
-                try {
-                    await delay(1500)
-                    await sock.sendMessage(msg.key.remoteJid, {
-                        react: { text: emojis[i % emojis.length], key: msg.key }
-                    })
-                } catch (e) { console.log("Gagal react, skip...") }
+            console.log(`[LOG] Ada post baru! Kirim ${jumlahReact} reaksi...`)
+            for (let i = 0; i < jumlahReact; i++) {
+                await delay(2000)
+                await sock.sendMessage(msg.key.remoteJid, {
+                    react: { text: listEmoji[i % listEmoji.length], key: msg.key }
+                })
             }
         }
     })
 
     sock.ev.on('creds.update', saveCreds)
-    
-    sock.ev.on('connection.update', (update) => {
-        const { connection, lastDisconnect } = update
-        if (connection === 'open') {
-            console.log('\n✅ BOT BERHASIL CONNECT! Ready to spam reactions! 🚀')
-        }
-        if (connection === 'close') {
-            console.log('Koneksi putus, mencoba menyambung ulang...')
-            startBot()
-        }
+    sock.ev.on('connection.update', (up) => {
+        const { connection } = up
+        if (connection === 'open') console.log('\n[!] BOT CONNECTED!')
+        if (connection === 'close') startBot()
     })
 }
 
 startBot()
-        
+            
