@@ -3,31 +3,44 @@ const {
     useMultiFileAuthState, 
     delay, 
     makeCacheableSignalKeyStore,
-    PHONENUMBER_MCC
+    fetchLatestBaileysVersion
 } = require("@whiskeysockets/baileys")
 const pino = require('pino')
 const readline = require("readline")
+const fs = require('fs')
 
 const rl = readline.createInterface({ input: process.stdin, output: process.stdout })
 const question = (text) => new Promise((resolve) => rl.question(text, resolve))
 
 async function startBot() {
+    // Biar gak error "Session" lama, kita pake folder fresh
     const { state, saveCreds } = await useMultiFileAuthState('session_wexin')
-    
+    const { version } = await fetchLatestBaileysVersion()
+
     const sock = makeWASocket({
+        version,
         auth: state,
-        printQRInTerminal: false, // QR dimatikan biar bisa pairing code
-        logger: pino({ level: "fatal" }),
+        printQRInTerminal: false, 
+        logger: pino({ level: "silent" }), // Ini biar log 'berisik' tadi ILANG
         browser: ["Ubuntu", "Chrome", "20.0.0.0"]
     })
 
-    // --- LOGIC PAIRING CODE ---
+    // --- LOGIC PAIRING CODE YANG LEBIH RAPI ---
     if (!sock.authState.creds.registered) {
-        console.log("=== WEXIN REACT CORE PAIRING ===")
-        const phoneNumber = await question('Masukkan nomor WhatsApp lo (contoh: 62812xxx): ')
+        console.clear() // Bersihin layar Termux
+        console.log("========================================")
+        console.log("     WEXIN REACT CORE - PAIRING CODE    ")
+        console.log("========================================")
+        
+        const phoneNumber = await question('Masukkan nomor WA (Contoh: 628xxx): ')
+        await delay(3000)
         const code = await sock.requestPairingCode(phoneNumber.trim())
-        console.log(`\nKODE PAIRING LO: ${code}\n`)
-        console.log("Buka WA > Perangkat Tertaut > Tautkan Perangkat > Tautkan dengan nomor telepon saja.")
+        
+        console.log(`\n👉 KODE PAIRING LO: ${code}`)
+        console.log("\nCara Pakai:")
+        console.log("1. Buka WA > Perangkat Tertaut > Tautkan Perangkat")
+        console.log("2. Pilih 'Tautkan dengan nomor telepon saja'")
+        console.log("3. Masukkan kode di atas.\n")
     }
 
     // --- LOGIC AUTO REACT CHANNEL ---
@@ -36,16 +49,18 @@ async function startBot() {
         if (!msg.message || msg.key.fromMe) return
         
         if (msg.key.remoteJid.endsWith('@newsletter')) {
-            const emojis = ["🔥", "🚀", "🤮"] // Ganti sesuka lo
-            const count = 3 // Mau berapa kali react
+            const emojis = ["🔥", "🚀", "🖕", "💯", "🤮"] // Bebas ganti
+            const count = 5 // Bebas berapa kali
             
-            console.log(`Postingan baru di Channel! Gas kasih ${count} reaksi...`)
+            console.log(`[+] Ada postingan baru! Gas ${count} react...`)
             
             for (let i = 0; i < count; i++) {
-                await delay(2000) // Jeda biar gak kena spam filter
-                await sock.sendMessage(msg.key.remoteJid, {
-                    react: { text: emojis[i % emojis.length], key: msg.key }
-                })
+                try {
+                    await delay(1500)
+                    await sock.sendMessage(msg.key.remoteJid, {
+                        react: { text: emojis[i % emojis.length], key: msg.key }
+                    })
+                } catch (e) { console.log("Gagal react, skip...") }
             }
         }
     })
@@ -53,11 +68,16 @@ async function startBot() {
     sock.ev.on('creds.update', saveCreds)
     
     sock.ev.on('connection.update', (update) => {
-        const { connection } = update
-        if (connection === 'open') console.log('\nBot Berhasil Terhubung! Ready to React! 🚀')
-        if (connection === 'close') startBot()
+        const { connection, lastDisconnect } = update
+        if (connection === 'open') {
+            console.log('\n✅ BOT BERHASIL CONNECT! Ready to spam reactions! 🚀')
+        }
+        if (connection === 'close') {
+            console.log('Koneksi putus, mencoba menyambung ulang...')
+            startBot()
+        }
     })
 }
 
 startBot()
-            
+        
